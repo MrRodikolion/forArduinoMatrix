@@ -1,5 +1,7 @@
 import pygame
+import serial
 from collor import ColorPicker
+from time import sleep
 
 n = 10
 
@@ -13,7 +15,7 @@ def quit(cells):
                 roww = row[::-1]
             else:
                 roww = row
-            c+=1
+            c += 1
             for cell in roww:
                 if cell:
                     f.write('\t{' + ', '.join(map(str, cell[:-1])) + '},\n')
@@ -56,6 +58,25 @@ def color_cells(screen: pygame.Surface, cells):
             )
 
 
+s = serial.Serial('COM3', 9600)
+
+
+def send(cell_id: int, color=(0, 0, 0)):
+    s.write(f'${str(cell_id)}_{color[0]}_{color[1]}_{color[2]};'.encode())
+
+
+def clear():
+    for y in range(10):
+        for x in range(10):
+            cell_id = y * 10
+            if y % 2 == 0:
+                cell_id += x
+            else:
+                cell_id += 9 - x
+            send(cell_id)
+            sleep(0.15)
+
+
 def main():
     pygame.init()
 
@@ -69,7 +90,7 @@ def main():
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                quit(cells)
+                clear()
                 return
             if event.type == pygame.MOUSEMOTION or event.type == pygame.MOUSEBUTTONDOWN:
                 if event.type == pygame.MOUSEBUTTONDOWN or any(event.buttons):
@@ -77,6 +98,14 @@ def main():
                     y = event.pos[1] // (screen.get_width() // n)
                     if x < 10 and y < 10:
                         cells[y][x] = cp.get_color()
+
+                        cell_id = y * 10
+                        if y % 2 == 0:
+                            cell_id += x
+                        else:
+                            cell_id += 9 - x
+                        send(cell_id, cells[y][x])
+                        sleep(0.1)
 
         cp.update()
 
