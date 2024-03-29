@@ -10,7 +10,7 @@ import requests
 
 n = 10
 
-s = serial.Serial('COM3', 9600)
+s = serial.Serial('COM4', 9600)
 
 
 def send(cell_id: int, color=(0, 0, 0)):
@@ -49,8 +49,8 @@ def main():
 
     while True:
         current_track = sp.current_user_playing_track()
-        if current_track is not None:
-            if current_track_name == current_track['item']['name']:
+        if current_track:
+            if current_track is None or current_track_name == current_track['item']['name']:
                 continue
             current_track_name = current_track['item']['name']
 
