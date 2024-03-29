@@ -1,9 +1,7 @@
 import serial
 import pyaudiowpatch as pyaudio
 import time
-import wave
 import numpy as np
-import scipy.signal as signal
 import matplotlib.pyplot as plt
 from random import randint
 
