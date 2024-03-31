@@ -4,45 +4,39 @@ import serial
 from spotify import SpotifyThread
 from Equalizer import EqualizerThread
 
+
 def quit_app():
-    spotify_th.running = False
-    spotify_th.global_running = False
-    equalizer_th.running = False
-    equalizer_th.global_running = False
-    if spotify_th.is_alive():
-        spotify_th.join(timeout=5)
+    global spotify_th, equalizer_th
     if equalizer_th.is_alive():
-        equalizer_th.join(timeout=5)
+        equalizer_th.running = False
+        equalizer_th.join()
+    if spotify_th.is_alive():
+        spotify_th.running = False
+        spotify_th.join()
 
     app.quit()
 
 
 def set_spotify_mode():
-    try:
+    global spotify_th, equalizer_th
+    if equalizer_th.is_alive():
         equalizer_th.running = False
-        while not equalizer_th.sleeping:
-            pass
-        spotify_th.running = True
-        spotify_th.sleeping = False
-    except BaseException as e:
-        print(e)
+        equalizer_th.join()
+    spotify_th = SpotifyThread()
+    spotify_th.start()
+
 
 def set_equalizer_mode():
-    try:
+    global equalizer_th, spotify_th
+    if spotify_th.is_alive():
         spotify_th.running = False
-        while not spotify_th.sleeping:
-            pass
-        equalizer_th.running = True
-        equalizer_th.sleeping = False
-    except BaseException as e:
-        print(e)
-
+        spotify_th.join()
+    equalizer_th = EqualizerThread()
+    equalizer_th.start()
 
 
 spotify_th = SpotifyThread()
 equalizer_th = EqualizerThread()
-spotify_th.start()
-equalizer_th.start()
 
 app = QApplication([])
 app.setQuitOnLastWindowClosed(False)
@@ -68,4 +62,3 @@ menu.addAction(quito)
 tray.setContextMenu(menu)
 
 app.exec_()
-spotify_th.join()

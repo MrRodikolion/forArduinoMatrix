@@ -41,79 +41,73 @@ class SpotifyThread(Thread):
     def __init__(self):
         super().__init__()
         self.running = True
-        self.global_running = True
-        self.sleeping = True
 
     def run(self):
-        while self.global_running:
-            while self.sleeping:
-                pass
-            spotify_th = SpotifyImgThread()
-            spotify_th.start()
+        spotify_th = SpotifyImgThread()
+        spotify_th.start()
 
-            CHUNK_SIZE = 512
-            with pyaudio.PyAudio() as p:
-                wasapi_info = p.get_host_api_info_by_type(pyaudio.paWASAPI)
+        CHUNK_SIZE = 512
+        with pyaudio.PyAudio() as p:
+            wasapi_info = p.get_host_api_info_by_type(pyaudio.paWASAPI)
 
-                # Get default WASAPI speakers
-                default_speakers = p.get_device_info_by_index(wasapi_info["defaultOutputDevice"])
+            # Get default WASAPI speakers
+            default_speakers = p.get_device_info_by_index(wasapi_info["defaultOutputDevice"])
 
-                def fft(data=None, trimBy=10, logScale=False, divBy=100):
-                    left, right = np.split(np.abs(np.fft.fft(data)), 2)
-                    ys = np.add(left, right[::-1])
-                    if logScale:
-                        ys = np.multiply(20, np.log10(ys))
-                    xs = np.arange(CHUNK_SIZE / 2, dtype=float)
-                    if trimBy:
-                        i = int((CHUNK_SIZE / 2) / trimBy)
-                        ys = ys[:i]
-                        xs = xs[:i] * int(default_speakers["defaultSampleRate"]) / CHUNK_SIZE
-                    if divBy:
-                        ys = ys / float(divBy)
-                    return xs, ys
+            def fft(data=None, trimBy=10, logScale=False, divBy=100):
+                left, right = np.split(np.abs(np.fft.fft(data)), 2)
+                ys = np.add(left, right[::-1])
+                if logScale:
+                    ys = np.multiply(20, np.log10(ys))
+                xs = np.arange(CHUNK_SIZE / 2, dtype=float)
+                if trimBy:
+                    i = int((CHUNK_SIZE / 2) / trimBy)
+                    ys = ys[:i]
+                    xs = xs[:i] * int(default_speakers["defaultSampleRate"]) / CHUNK_SIZE
+                if divBy:
+                    ys = ys / float(divBy)
+                return xs, ys
 
-                if not default_speakers["isLoopbackDevice"]:
-                    for loopback in p.get_loopback_device_info_generator():
-                        if default_speakers["name"] in loopback["name"]:
-                            default_speakers = loopback
-                            break
+            if not default_speakers["isLoopbackDevice"]:
+                for loopback in p.get_loopback_device_info_generator():
+                    if default_speakers["name"] in loopback["name"]:
+                        default_speakers = loopback
+                        break
 
-                old_bri = 0
+            old_bri = 0
 
-                with p.open(format=pyaudio.paInt16,
-                            channels=default_speakers["maxInputChannels"],
-                            rate=int(default_speakers["defaultSampleRate"]),
-                            frames_per_buffer=CHUNK_SIZE,
-                            input=True,
-                            input_device_index=default_speakers["index"],
-                            ) as stream:
-                    while self.running:
-                        data = stream.read(CHUNK_SIZE)
-                        data = np.frombuffer(data, dtype=np.int16)
-                        xs, data = fft(data)
-                        # data = data[1 * (len(data) // 10):]
+            with p.open(format=pyaudio.paInt16,
+                        channels=default_speakers["maxInputChannels"],
+                        rate=int(default_speakers["defaultSampleRate"]),
+                        frames_per_buffer=CHUNK_SIZE,
+                        input=True,
+                        input_device_index=default_speakers["index"],
+                        ) as stream:
+                while self.running:
+                    data = stream.read(CHUNK_SIZE)
+                    data = np.frombuffer(data, dtype=np.int16)
+                    xs, data = fft(data)
+                    # data = data[1 * (len(data) // 10):]
 
-                        bri = sum(data) // len(data)
-                        bri = normalize([bri], (0, 20_000), (10, 30))[0]
-                        bri = min(50, max(0, bri))
+                    bri = sum(data) // len(data)
+                    bri = normalize([bri], (0, 20_000), (10, 50))[0]
+                    bri = min(50, max(0, bri))
 
-                        if not spotify_th.sending_img and bri != old_bri and bri != 10 and abs(old_bri - bri) > 2:
+                    if not spotify_th.sending_img and bri != old_bri and bri != 10 and abs(old_bri - bri) > 2:
+                        send(
+                            0,
+                            color=spotify_th.zero_pix,
+                            brightnes=bri
+                        )
+                    else:
+                        if bri == 10 and bri != old_bri:
                             send(
                                 0,
                                 color=spotify_th.zero_pix,
-                                brightnes=bri
+                                brightnes=50
                             )
-                        else:
-                            if bri == 10 and bri != old_bri:
-                                send(
-                                    0,
-                                    color=spotify_th.zero_pix,
-                                    brightnes=50
-                                )
-                        old_bri = bri
-            spotify_th.running = False
-            spotify_th.join(timeout=5)
-            self.sleeping = True
+                    old_bri = bri
+        spotify_th.running = False
+        spotify_th.join(timeout=5)
 
 
 class SpotifyImgThread(Thread):
