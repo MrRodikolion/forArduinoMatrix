@@ -15,7 +15,7 @@ from threading import Thread
 
 n = 10
 
-s = serial.Serial('COM3', 9600)
+s = serial.Serial('COM8', 9600)
 
 
 def send(cell_id: int, color=(0, 0, 0), brightnes=50):
@@ -83,19 +83,20 @@ def main():
                 data = stream.read(CHUNK_SIZE)
                 data = np.frombuffer(data, dtype=np.int16)
                 xs, data = fft(data)
-                data = data[1 * (len(data) // 10): 2 * (len(data) // 10)]
+                # data = data[1 * (len(data) // 10):]
 
                 bri = sum(data) // len(data)
-                bri = normalize([bri], (0, 20_000), (5, 50))[0]
+                bri = normalize([bri], (0, 20_000), (10, 30))[0]
                 bri = min(50, max(0, bri))
 
-                if not spotify_th.sending_img and bri != old_bri != 5.0:
+                if not spotify_th.sending_img and bri != old_bri and bri != 10 and abs(old_bri - bri) > 2:
                     send(
                         0,
                         color=spotify_th.zero_pix,
                         brightnes=bri
                     )
-                    if bri == 5.0:
+                else:
+                    if bri == 10 and bri != old_bri:
                         send(
                             0,
                             color=spotify_th.zero_pix,
@@ -133,7 +134,7 @@ class SpotifyImgThread(Thread):
                     img = images[0]
                     img_bytes = io.BytesIO(requests.get(img['url']).content)
                     img_pil = Image.open(img_bytes)
-                    img_pil = img_pil.resize((10, 10), Image.NEAREST)
+                    img_pil = img_pil.resize((10, 10), Image.LANCZOS)
                     img_pil = img_pil.convert('RGB')
                     # img_pil = ImageEnhance.Contrast(img_pil).enhance(100)
                     self.zero_pix = img_pil.getpixel((0, 0))
@@ -158,6 +159,7 @@ class SpotifyImgThread(Thread):
                     self.sending_img = False
             except BaseException as e:
                 print(e)
+            sleep(5)
 
 
 if __name__ == '__main__':

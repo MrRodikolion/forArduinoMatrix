@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from random import randint
 
-s = serial.Serial('COM3', 9600)
+s = serial.Serial('COM8', 9600)
 
 
 def send(cols):

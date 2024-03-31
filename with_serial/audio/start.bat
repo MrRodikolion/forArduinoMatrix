@@ -1,3 +1,3 @@
-call C:\Users\Mr.Rodikolion\miniconda3\Scripts\activate.bat
-call conda activate yan
+call C:\Users\rodikolion\Desktop\for_arduino matrix\venv\Scripts\activate.bat
 python audio_sender.py
+pause
