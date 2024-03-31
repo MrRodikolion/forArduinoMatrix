@@ -14,7 +14,7 @@ s = serial.Serial('COM4', 9600)
 
 
 def send(cell_id: int, color=(0, 0, 0)):
-    s.write(f'${str(cell_id)}_{color[0]}_{color[1]}_{color[2]};'.encode())
+    s.write(f'S{str(cell_id)},{color[0]},{color[1]},{color[2]},20,'.encode())
     s.read()
 
 

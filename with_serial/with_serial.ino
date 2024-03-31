@@ -54,10 +54,11 @@ void loop() {
       B += buffer[3][b_len - i - 1] * pow(10, i);
     }
 
-    Serial.print(cell_id);Serial.print(' ');Serial.print(R);Serial.print(' ');Serial.print(G);Serial.print(' ');Serial.println(B);
+    // Serial.print(cell_id);Serial.print(' ');Serial.print(R);Serial.print(' ');Serial.print(G);Serial.print(' ');Serial.println(B);
 
     leds[(int)cell_id] = CRGB(min((int)R, 255), min((int)G, 255), min((int)B, 255));
     FastLED.show();
+    Serial.print('d');
   }
 }
 

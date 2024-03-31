@@ -5,11 +5,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from random import randint
 
-s = serial.Serial('COM4', 9600)
+s = serial.Serial('COM3', 9600)
 
 
 def send(cols):
-    to_com = f'${",".join(str(int(col) + 1) for col in cols)};'
+    to_com = f'E{",".join(str(int(col)) for col in cols)},'
+    print(to_com)
     s.write(to_com.encode())
     s.read()
 

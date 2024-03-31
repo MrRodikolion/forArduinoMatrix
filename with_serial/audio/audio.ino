@@ -16,6 +16,8 @@ byte counters[10];
 
 float col_val;
 
+
+
 void setup() {
   Serial.begin(9600);
   FastLED.addLeds<WS2812, LED_PIN, GRB>(leds, LED_NUM);
