@@ -10,7 +10,6 @@ s = serial.Serial('COM3', 9600)
 
 def send(cols):
     to_com = f'E{",".join(str(int(col)) for col in cols)},'
-    print(to_com)
     s.write(to_com.encode())
     s.read()
 
@@ -73,15 +72,6 @@ if __name__ == "__main__":
                     patch = np.max(data[i * (len(data) // 10): (i + 1) * (len(data) // 10)])
                     patch = max(0, min(h, patch))
                     um.append(patch)
-                um = normalize(um, (0, h), (0, 9))
+                um = normalize(um, (0, h), (0, 10))[::-1]
 
                 send(um)
-
-
-                # plt.plot(data)
-                # plt.grid()
-                # plt.axis([0, len(data), 0, h])
-                # # plt.savefig("03.png", dpi=50)
-                # plt.show(block=False)
-                # plt.pause(0.01)
-                # plt.clf()
