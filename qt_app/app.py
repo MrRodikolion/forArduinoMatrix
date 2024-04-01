@@ -35,8 +35,19 @@ def set_equalizer_mode():
     equalizer_th.start()
 
 
+def pause():
+    global spotify_th, equalizer_th
+    if equalizer_th.is_alive():
+        equalizer_th.running = False
+        equalizer_th.join()
+    if spotify_th.is_alive():
+        spotify_th.running = False
+        spotify_th.join()
+
+
 spotify_th = SpotifyThread()
 equalizer_th = EqualizerThread()
+equalizer_th.start()
 
 app = QApplication([])
 app.setQuitOnLastWindowClosed(False)
@@ -54,6 +65,9 @@ menu.addAction(spotify_option)
 equalizer_option = QAction("Equalizer Mode")
 equalizer_option.triggered.connect(set_equalizer_mode)
 menu.addAction(equalizer_option)
+pause_option = QAction("Pause")
+pause_option.triggered.connect(pause)
+menu.addAction(pause_option)
 
 quito = QAction("Quit")
 quito.triggered.connect(quit_app)

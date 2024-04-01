@@ -1,0 +1,1 @@
+CreateObject("Wscript.Shell").Run "qt_app_start.bat",0,True
