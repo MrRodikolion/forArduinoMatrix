@@ -1,4 +1,5 @@
 import pprint
+import time
 
 import serial
 from time import sleep
@@ -10,15 +11,18 @@ import requests
 import serial
 import pyaudiowpatch as pyaudio
 import numpy as np
+import win32gui
+import win32process
+import psutil
+import pygetwindow as gw
 
 from threading import Thread
-
-from serial_config import s
+from serial_config import get_serial
 
 n = 10
 
 
-def send(cell_id: int, color=(0, 0, 0), brightnes=50):
+def send(s, cell_id: int, color=(0, 0, 0), brightnes=50):
     to_com = f'S{str(cell_id)},{color[0]},{color[1]},{color[2]},{int(brightnes)},'
     s.write(to_com.encode())
     s.read()
@@ -37,13 +41,39 @@ def normalize(values, actual_bounds, desired_bounds):
     return [desired_bounds[0] + (x - actual_bounds[0]) * (desired_bounds[1] - desired_bounds[0]) / (
             actual_bounds[1] - actual_bounds[0]) for x in values]
 
+
+def get_win_name():
+    spoti = r"Spotify.exe"
+    hwnd_list = []
+
+    def winEnumHandler(hwnd, ctx):
+        if win32gui.IsWindowVisible(hwnd):
+            thread_id, process_id = win32process.GetWindowThreadProcessId(hwnd)
+            # Get the process name and executable path
+            process = psutil.Process(process_id)
+            process_name = process.name()
+            process_path = process.exe()
+            if spoti == process_name:
+                hwnd_list.append(hwnd)
+
+    win32gui.EnumWindows(winEnumHandler, None)
+
+    hwnd = hwnd_list[0]
+
+    window = gw.Win32Window(hwnd)
+
+    return window.title
+
+
 class SpotifyThread(Thread):
     def __init__(self):
         super().__init__()
         self.running = True
 
     def run(self):
-        spotify_th = SpotifyImgThread()
+        s = get_serial()
+
+        spotify_th = SpotifyImgThread(s)
         spotify_th.start()
 
         CHUNK_SIZE = 512
@@ -92,8 +122,10 @@ class SpotifyThread(Thread):
                     bri = normalize([bri], (0, 20_000), (10, 50))[0]
                     bri = min(50, max(0, bri))
 
+                    ts = time.time()
                     if not spotify_th.sending_img and bri != old_bri and bri != 10 and abs(old_bri - bri) > 2:
                         send(
+                            s,
                             0,
                             color=spotify_th.zero_pix,
                             brightnes=bri
@@ -101,21 +133,25 @@ class SpotifyThread(Thread):
                     else:
                         if bri == 10 and bri != old_bri:
                             send(
+                                s,
                                 0,
                                 color=spotify_th.zero_pix,
                                 brightnes=50
                             )
+                    if time.time() - ts > 1:
+                        break
                     old_bri = bri
         spotify_th.running = False
         spotify_th.join(timeout=5)
 
 
 class SpotifyImgThread(Thread):
-    def __init__(self):
+    def __init__(self, s):
         super().__init__()
         self.sending_img = False
         self.zero_pix = (0, 0, 0)
         self.running = True
+        self.s = s
 
     def run(self):
         scope = "user-read-currently-playing"
@@ -125,14 +161,15 @@ class SpotifyImgThread(Thread):
                                                        scope=scope))
         current_track_name = ''
         while self.running:
+            current_win_name = get_win_name()
+            if current_track_name == current_win_name or current_win_name == 'Spotify Free':
+                continue
+            current_track_name = get_win_name()
+            sleep(2)
             try:
                 current_track = sp.current_user_playing_track()
                 if current_track is not None:
-                    if current_track_name == current_track['item']['name']:
-                        self.sending_img = False
-                        continue
                     self.sending_img = True
-                    current_track_name = current_track['item']['name']
 
                     album = current_track['item']['album']
                     images = album['images']
@@ -154,15 +191,18 @@ class SpotifyImgThread(Thread):
                             else:
                                 cell_id += 9 - x
 
+                            ts = time.time()
                             send(
+                                self.s,
                                 cell_id,
                                 color=pixel,
                                 brightnes=20
                             )
-
-                else:
+                            if time.time() - ts > 1:
+                                self.running = False
+                                break
+                        if not self.running:
+                            break
                     self.sending_img = False
             except BaseException as e:
                 print(e)
-            sleep(5)
-

@@ -1,3 +1,4 @@
 import serial
 
-s = serial.Serial('COM8', 9600)
+def get_serial():
+    return serial.Serial('COM8', 9600, timeout=1)

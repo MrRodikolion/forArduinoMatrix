@@ -1,18 +1,21 @@
 import serial
+from serial.tools import list_ports
 import pyaudiowpatch as pyaudio
 import time
 import numpy as np
 import matplotlib.pyplot as plt
 from random import randint
 from threading import Thread
+from serial_config import get_serial
 
-from serial_config import s
 
 
-def send(cols):
+def send(s: serial.Serial, cols):
     to_com = f'E{",".join(str(int(col)) for col in cols)},'
+
     s.write(to_com.encode())
     s.read()
+
 
 
 def normalize(values, actual_bounds, desired_bounds):
@@ -30,6 +33,7 @@ class EqualizerThread(Thread):
 
 
     def run(self):
+        s = get_serial()
         h = 0
         with pyaudio.PyAudio() as p:
             wasapi_info = p.get_host_api_info_by_type(pyaudio.paWASAPI)
@@ -80,4 +84,7 @@ class EqualizerThread(Thread):
                         um.append(patch)
                     um = normalize(um, (0, h), (0, 10))[::-1]
 
-                    send(um)
+                    ts = time.time()
+                    send(s, um)
+                    if time.time() - ts > 1:
+                        break
