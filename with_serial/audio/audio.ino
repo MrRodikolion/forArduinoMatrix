@@ -36,7 +36,7 @@ void loop() {
       }
       // Serial.print(col_val);Serial.print(' ');
       int cell_id = 0;
-      for (int cell_y = 0; cell_y < col_val; ++cell_y){
+      for (int cell_y = 0; cell_y < min(col_val, 10.0f); ++cell_y){
         cell_id = (9 - cell_y) * 10;
         if (cell_y % 2 != 0) {
           cell_id += col;
@@ -55,7 +55,7 @@ void loop() {
   }
 }
 
-// парсер. Возвращает количество принятых байтов даты
+// Validate field count and digit capacity before touching the receive buffer.
 int parsing() {
   static bool parseStart = false;
   static byte counter = 0;
@@ -63,31 +63,39 @@ int parsing() {
 
   if (Serial.available()) {
     char in = Serial.read();
-    if (in == '\n' || in == '\r')
-      return 0;       // игнорируем перевод строки
-    if (in == ';') {  // завершение пакета
-      counters[bi] = counter;
-      parseStart = false;
-      return counter;
-    }
-    if (in == '$') {  // начало пакета
+    if (in == '$') {
       parseStart = true;
       counter = 0;
       bi = 0;
       return 0;
     }
-    if (in == ',') {
-      counters[bi] = counter;
-
-      counter = 0;
-      bi++;
+    if (!parseStart || in == '\n' || in == '\r') {
       return 0;
     }
-    if (parseStart) {  // чтение пакета
-      // - '0' это перевод в число (если отправитель print)
-      buffer[bi][counter] = in - ASCII_CONVERT;
-      counter++;
+    if (in == ';') {
+      parseStart = false;
+      if (bi != 9 || counter == 0) {
+        return 0;
+      }
+      counters[bi] = counter;
+      return counter;
     }
+    if (in == ',') {
+      if (bi >= 9 || counter == 0) {
+        parseStart = false;
+        return 0;
+      }
+      counters[bi] = counter;
+      counter = 0;
+      ++bi;
+      return 0;
+    }
+    if (in < '0' || in > '9' || bi >= sizeof(buffer) / sizeof(buffer[0])
+        || counter >= sizeof(buffer[0])) {
+      parseStart = false;
+      return 0;
+    }
+    buffer[bi][counter++] = in - ASCII_CONVERT;
   }
   return 0;
 }

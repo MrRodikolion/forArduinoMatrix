@@ -1,24 +1,21 @@
 import serial
-from serial.tools import list_ports
 import pyaudiowpatch as pyaudio
-import time
 import numpy as np
-import matplotlib.pyplot as plt
-from random import randint
 from threading import Thread
-from serial_config import get_serial
+from serial_config import get_serial, send_packet
 
 
 
 def send(s: serial.Serial, cols):
     to_com = f'E{",".join(str(int(col)) for col in cols)},'
 
-    s.write(to_com.encode())
-    s.read()
+    send_packet(s, to_com.encode())
 
 
 
 def normalize(values, actual_bounds, desired_bounds):
+    if actual_bounds[0] == actual_bounds[1]:
+        return [desired_bounds[0] for _ in values]
     return [desired_bounds[0] + (x - actual_bounds[0]) * (desired_bounds[1] - desired_bounds[0]) / (
             actual_bounds[1] - actual_bounds[0]) for x in values]
 
@@ -30,10 +27,22 @@ class EqualizerThread(Thread):
     def __init__(self):
         super().__init__()
         self.running = True
+        self.error = None
 
+
+    def stop(self):
+        self.running = False
 
     def run(self):
-        s = get_serial()
+        try:
+            with get_serial() as s:
+                self._run_audio(s)
+        except Exception as error:
+            self.error = str(error)
+        finally:
+            self.running = False
+
+    def _run_audio(self, s):
         h = 0
         with pyaudio.PyAudio() as p:
             wasapi_info = p.get_host_api_info_by_type(pyaudio.paWASAPI)
@@ -60,6 +69,8 @@ class EqualizerThread(Thread):
                     if default_speakers["name"] in loopback["name"]:
                         default_speakers = loopback
                         break
+                else:
+                    raise RuntimeError('No WASAPI loopback input matches the output device')
 
             with p.open(format=pyaudio.paInt16,
                         channels=default_speakers["maxInputChannels"],
@@ -84,7 +95,4 @@ class EqualizerThread(Thread):
                         um.append(patch)
                     um = normalize(um, (0, h), (0, 10))[::-1]
 
-                    ts = time.time()
                     send(s, um)
-                    if time.time() - ts > 1:
-                        break

@@ -1,78 +1,80 @@
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
-import serial
+import sys
+from pathlib import Path
+
+from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import QAction, QApplication, QMenu, QMessageBox, QSystemTrayIcon
+
 from spotify import SpotifyThread
 from Equalizer import EqualizerThread
 
-
-def quit_app():
-    global spotify_th, equalizer_th
-    if equalizer_th.is_alive():
-        equalizer_th.running = False
-        equalizer_th.join()
-    if spotify_th.is_alive():
-        spotify_th.running = False
-        spotify_th.join()
-
-    app.quit()
+spotify_th = None
+equalizer_th = None
+app = None
 
 
-def set_spotify_mode():
-    global spotify_th, equalizer_th
-    if equalizer_th.is_alive():
-        equalizer_th.running = False
-        equalizer_th.join()
-    spotify_th = SpotifyThread()
-    spotify_th.start()
-
-
-def set_equalizer_mode():
-    global equalizer_th, spotify_th
-    if spotify_th.is_alive():
-        spotify_th.running = False
-        spotify_th.join()
-    equalizer_th = EqualizerThread()
-    equalizer_th.start()
+def _stop_thread(worker):
+    if worker is not None and worker.is_alive():
+        worker.stop()
+        worker.join(timeout=5)
+        if worker.is_alive():
+            QMessageBox.warning(None, 'Matrix',
+                                'The current mode is still stopping. Please retry shortly.')
+            return False
+    return True
 
 
 def pause():
-    global spotify_th, equalizer_th
-    if equalizer_th.is_alive():
-        equalizer_th.running = False
-        equalizer_th.join()
-    if spotify_th.is_alive():
-        spotify_th.running = False
-        spotify_th.join()
+    equalizer_stopped = _stop_thread(equalizer_th)
+    spotify_stopped = _stop_thread(spotify_th)
+    return equalizer_stopped and spotify_stopped
 
 
-spotify_th = SpotifyThread()
-equalizer_th = EqualizerThread()
-equalizer_th.start()
+def quit_app():
+    if pause() and app is not None:
+        app.quit()
 
-app = QApplication([])
-app.setQuitOnLastWindowClosed(False)
 
-icon = QIcon("icon.png")
+def set_spotify_mode():
+    global spotify_th
+    if spotify_th is not None and spotify_th.is_alive() and spotify_th.running:
+        return
+    if pause():
+        spotify_th = SpotifyThread()
+        spotify_th.start()
 
-tray = QSystemTrayIcon()
-tray.setIcon(icon)
-tray.setVisible(True)
 
-menu = QMenu()
-spotify_option = QAction("Spotify Mode")
-spotify_option.triggered.connect(set_spotify_mode)
-menu.addAction(spotify_option)
-equalizer_option = QAction("Equalizer Mode")
-equalizer_option.triggered.connect(set_equalizer_mode)
-menu.addAction(equalizer_option)
-pause_option = QAction("Pause")
-pause_option.triggered.connect(pause)
-menu.addAction(pause_option)
+def set_equalizer_mode():
+    global equalizer_th
+    if equalizer_th is not None and equalizer_th.is_alive() and equalizer_th.running:
+        return
+    if pause():
+        equalizer_th = EqualizerThread()
+        equalizer_th.start()
 
-quito = QAction("Quit")
-quito.triggered.connect(quit_app)
-menu.addAction(quito)
 
-tray.setContextMenu(menu)
+def main():
+    global app
+    app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
+    app.aboutToQuit.connect(pause)
 
-app.exec_()
+    icon = QIcon(str(Path(__file__).resolve().parent / 'icon.png'))
+    tray = QSystemTrayIcon(icon)
+    tray.setToolTip('Arduino Matrix')
+
+    menu = QMenu()
+    for label, callback in (('Spotify Mode', set_spotify_mode),
+                            ('Equalizer Mode', set_equalizer_mode),
+                            ('Pause', pause), ('Quit', quit_app)):
+        action = QAction(label, menu)
+        action.triggered.connect(callback)
+        menu.addAction(action)
+
+    tray.setContextMenu(menu)
+    tray.show()
+    set_equalizer_mode()
+    return app.exec_()
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -1,12 +1,8 @@
-import pprint
-import time
 
-import serial
-from time import sleep
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import io
-from PIL import Image, ImageEnhance
+from PIL import Image
 import requests
 import serial
 import pyaudiowpatch as pyaudio
@@ -16,16 +12,15 @@ import win32process
 import psutil
 import pygetwindow as gw
 
-from threading import Thread
-from serial_config import get_serial
+from threading import Event, Thread
+from serial_config import get_serial, send_packet
 
 n = 10
 
 
 def send(s, cell_id: int, color=(0, 0, 0), brightnes=50):
     to_com = f'S{str(cell_id)},{color[0]},{color[1]},{color[2]},{int(brightnes)},'
-    s.write(to_com.encode())
-    s.read()
+    send_packet(s, to_com.encode())
 
 
 def change_contrast(img, level):
@@ -38,44 +33,65 @@ def change_contrast(img, level):
 
 
 def normalize(values, actual_bounds, desired_bounds):
+    if actual_bounds[0] == actual_bounds[1]:
+        return [desired_bounds[0] for _ in values]
     return [desired_bounds[0] + (x - actual_bounds[0]) * (desired_bounds[1] - desired_bounds[0]) / (
             actual_bounds[1] - actual_bounds[0]) for x in values]
 
 
 def get_win_name():
-    spoti = r"Spotify.exe"
     hwnd_list = []
 
     def winEnumHandler(hwnd, ctx):
         if win32gui.IsWindowVisible(hwnd):
-            thread_id, process_id = win32process.GetWindowThreadProcessId(hwnd)
-            # Get the process name and executable path
-            process = psutil.Process(process_id)
-            process_name = process.name()
-            process_path = process.exe()
-            if spoti == process_name:
-                hwnd_list.append(hwnd)
+            try:
+                _, process_id = win32process.GetWindowThreadProcessId(hwnd)
+                if psutil.Process(process_id).name().lower() == 'spotify.exe':
+                    hwnd_list.append(hwnd)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                return
 
     win32gui.EnumWindows(winEnumHandler, None)
-
-    hwnd = hwnd_list[0]
-
-    window = gw.Win32Window(hwnd)
-
-    return window.title
+    if not hwnd_list:
+        return None
+    try:
+        return gw.Win32Window(hwnd_list[0]).title
+    except (OSError, RuntimeError):
+        return None
 
 
 class SpotifyThread(Thread):
     def __init__(self):
         super().__init__()
         self.running = True
+        self.error = None
+        self._image_thread = None
+
+    def stop(self):
+        self.running = False
+        if self._image_thread is not None:
+            self._image_thread.stop()
 
     def run(self):
-        s = get_serial()
+        try:
+            with get_serial() as s:
+                spotify_th = SpotifyImgThread(s)
+                self._image_thread = spotify_th
+                if not self.running:
+                    return
+                spotify_th.start()
+                try:
+                    self._run_audio(s, spotify_th)
+                finally:
+                    spotify_th.stop()
+                    # Retain ownership of the port until the image writer exits.
+                    spotify_th.join()
+        except Exception as error:
+            self.error = str(error)
+        finally:
+            self.running = False
 
-        spotify_th = SpotifyImgThread(s)
-        spotify_th.start()
-
+    def _run_audio(self, s, spotify_th):
         CHUNK_SIZE = 512
         with pyaudio.PyAudio() as p:
             wasapi_info = p.get_host_api_info_by_type(pyaudio.paWASAPI)
@@ -102,6 +118,8 @@ class SpotifyThread(Thread):
                     if default_speakers["name"] in loopback["name"]:
                         default_speakers = loopback
                         break
+                else:
+                    raise RuntimeError('No WASAPI loopback input matches the output device')
 
             old_bri = 0
 
@@ -113,6 +131,8 @@ class SpotifyThread(Thread):
                         input_device_index=default_speakers["index"],
                         ) as stream:
                 while self.running:
+                    if not spotify_th.is_alive():
+                        raise RuntimeError('Spotify artwork worker stopped')
                     data = stream.read(CHUNK_SIZE)
                     data = np.frombuffer(data, dtype=np.int16)
                     xs, data = fft(data)
@@ -122,7 +142,6 @@ class SpotifyThread(Thread):
                     bri = normalize([bri], (0, 20_000), (10, 50))[0]
                     bri = min(50, max(0, bri))
 
-                    ts = time.time()
                     if not spotify_th.sending_img and bri != old_bri and bri != 10 and abs(old_bri - bri) > 2:
                         send(
                             s,
@@ -138,11 +157,7 @@ class SpotifyThread(Thread):
                                 color=spotify_th.zero_pix,
                                 brightnes=50
                             )
-                    if time.time() - ts > 1:
-                        break
                     old_bri = bri
-        spotify_th.running = False
-        spotify_th.join(timeout=5)
 
 
 class SpotifyImgThread(Thread):
@@ -151,58 +166,68 @@ class SpotifyImgThread(Thread):
         self.sending_img = False
         self.zero_pix = (0, 0, 0)
         self.running = True
+        self.error = None
         self.s = s
+        self._stopped = Event()
 
-    def run(self):
+    def stop(self):
+        self.running = False
+        self._stopped.set()
+
+    def _make_client(self):
         scope = "user-read-currently-playing"
         sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id="94ca28be207d442ca8978852d28bcb11",
                                                        client_secret="32ae0ee9592f4bbbbe58bfc412ae1c32",
                                                        redirect_uri="https://github.com/MrRodikolion/forArduinoMatrix",
-                                                       scope=scope))
-        current_track_name = ''
-        while self.running:
-            current_win_name = get_win_name()
-            if current_track_name == current_win_name or current_win_name == 'Spotify Free':
-                continue
-            current_track_name = get_win_name()
-            sleep(2)
-            try:
-                current_track = sp.current_user_playing_track()
-                if current_track is not None:
-                    self.sending_img = True
+                                                       scope=scope, requests_timeout=5),
+                             requests_timeout=5, retries=0, status_retries=0)
+        return sp
 
-                    album = current_track['item']['album']
-                    images = album['images']
-                    img = images[0]
-                    img_bytes = io.BytesIO(requests.get(img['url']).content)
-                    img_pil = Image.open(img_bytes)
-                    img_pil = img_pil.resize((10, 10), Image.LANCZOS)
-                    img_pil = img_pil.convert('RGB')
-                    # img_pil = ImageEnhance.Contrast(img_pil).enhance(100)
+    def run(self):
+        try:
+            sp = self._make_client()
+            current_track_name = ''
+            while self.running:
+                try:
+                    current_win_name = get_win_name()
+                    if (not current_win_name or current_win_name == current_track_name
+                            or current_win_name == 'Spotify Free'):
+                        self._stopped.wait(0.5)
+                        continue
+                    if self._stopped.wait(2):
+                        break
+                    current_track = sp.current_user_playing_track()
+                    item = (current_track or {}).get('item') or {}
+                    images = (item.get('album') or {}).get('images') or []
+                    if not images:
+                        self._stopped.wait(1)
+                        continue
+                    with requests.get(images[0]['url'], timeout=(3, 5)) as response:
+                        response.raise_for_status()
+                        with Image.open(io.BytesIO(response.content)) as image:
+                            img_pil = image.resize((10, 10), Image.Resampling.LANCZOS).convert('RGB')
                     self.zero_pix = img_pil.getpixel((0, 0))
-
-                    for y in range(10):
-                        for x in range(10):
-                            pixel = img_pil.getpixel((x, y))
-
-                            cell_id = y * 10
-                            if y % 2 == 0:
-                                cell_id += x
-                            else:
-                                cell_id += 9 - x
-
-                            ts = time.time()
-                            send(
-                                self.s,
-                                cell_id,
-                                color=pixel,
-                                brightnes=20
-                            )
-                            if time.time() - ts > 1:
-                                self.running = False
+                    self.sending_img = True
+                    try:
+                        for y in range(10):
+                            for x in range(10):
+                                if not self.running:
+                                    break
+                                cell_id = y * 10 + (x if y % 2 == 0 else 9 - x)
+                                send(self.s, cell_id, color=img_pil.getpixel((x, y)), brightnes=20)
+                            if not self.running:
                                 break
-                        if not self.running:
-                            break
-                    self.sending_img = False
-            except BaseException as e:
-                print(e)
+                    finally:
+                        self.sending_img = False
+                    current_track_name = current_win_name
+                except (serial.SerialException, TimeoutError):
+                    self.error = 'Serial communication with the matrix failed'
+                    break
+                except Exception as error:
+                    self.error = type(error).__name__ + ': artwork update failed'
+                    self._stopped.wait(1)
+        except Exception as error:
+            self.error = type(error).__name__ + ': Spotify initialization failed'
+        finally:
+            self.sending_img = False
+            self.running = False

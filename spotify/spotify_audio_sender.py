@@ -35,6 +35,8 @@ def change_contrast(img, level):
 
 
 def normalize(values, actual_bounds, desired_bounds):
+    if actual_bounds[0] == actual_bounds[1]:
+        return [desired_bounds[0] for _ in values]
     return [desired_bounds[0] + (x - actual_bounds[0]) * (desired_bounds[1] - desired_bounds[0]) / (
             actual_bounds[1] - actual_bounds[0]) for x in values]
 

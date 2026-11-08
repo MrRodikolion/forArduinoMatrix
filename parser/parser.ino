@@ -71,131 +71,86 @@ void loop()
     }
 }
 
-// парсер. Возвращает количество принятых байтов даты
+// Consume only available bytes; partial frames never block loop().
 bool parse()
 {
-    bool isParsing = true;
+    static char activeType = '-';
+    static uint8_t field = 0;
+    static uint16_t value = 0;
+    static bool hasDigit = false;
+    static int values[10];
+    static unsigned long lastByte = 0;
+
+    if (activeType != '-' && (unsigned long)(millis() - lastByte) > 1000)
+    {
+        activeType = '-';
+    }
 
     while (Serial.available())
     {
         char in = Serial.read();
-
-        if (type == '-')
+        if (in == 'S' || in == 'E')
         {
-            type = in;
+            activeType = in;
+            field = 0;
+            value = 0;
+            hasDigit = false;
+            lastByte = millis();
             continue;
         }
-        if (type == 'S')
+        if (activeType == '-')
         {
-            sdata.cell_id = 0;
-            while (in != ',')
-            {
-                if (Serial.available())
-                {
-                    sdata.cell_id = sdata.cell_id * 10 + (in - '0');
-
-                    in = Serial.read();
-                }
-            }
-
-            while (in == ',')
-            {
-                if (Serial.available())
-                {
-                    in = Serial.read();
-                }
-            }
-            sdata.r = 0;
-            while (in != ',')
-            {
-                if (Serial.available())
-                {
-                    sdata.r = sdata.r * 10 + (in - '0');
-
-                    in = Serial.read();
-                }
-            }
-
-            while (in == ',')
-            {
-                if (Serial.available())
-                {
-                    in = Serial.read();
-                }
-            }
-            sdata.g = 0;
-            while (in != ',')
-            {
-                if (Serial.available())
-                {
-                    sdata.g = sdata.g * 10 + (in - '0');
-
-                    in = Serial.read();
-                }
-            }
-
-            while (in == ',')
-            {
-                if (Serial.available())
-                {
-                    in = Serial.read();
-                }
-            }
-            sdata.b = 0;
-            while (in != ',')
-            {
-                if (Serial.available())
-                {
-                    sdata.b = sdata.b * 10 + (in - '0');
-
-                    in = Serial.read();
-                }
-            }
-
-            while (in == ',')
-            {
-                if (Serial.available())
-                {
-                    in = Serial.read();
-                }
-            }
-            sdata.brightness = 0;
-            while (in != ',')
-            {
-                if (Serial.available())
-                {
-                    sdata.brightness = sdata.brightness * 10 + (in - '0');
-
-                    in = Serial.read();
-                }
-            }
-
-            return 1;
+            continue;
         }
-        else if (type == 'E')
+        lastByte = millis();
+        if (in == '\r' || in == '\n')
         {
-            for (size_t i = 0; i < 10; ++i)
+            continue;
+        }
+        if (in >= '0' && in <= '9')
+        {
+            uint16_t limit = activeType == 'E' ? 10 : (field == 0 ? LED_NUM - 1 : 255);
+            uint8_t digit = in - '0';
+            if (value > limit / 10 || (value == limit / 10 && digit > limit % 10))
             {
-                while (in == ',')
-                {
-                    if (Serial.available())
-                    {
-                        in = Serial.read();
-                    }
-                }
-                edata.cols_val[i] = 0;
-                while (in != ',')
-                {
-                    if (Serial.available())
-                    {
-                        edata.cols_val[i] = edata.cols_val[i] * 10 + (in - '0');
-
-                        in = Serial.read();
-                    }
-                }
+                activeType = '-';
+                continue;
             }
-            return 1;
+            value = value * 10 + digit;
+            hasDigit = true;
+        }
+        else if (in == ',' && hasDigit)
+        {
+            values[field++] = value;
+            value = 0;
+            hasDigit = false;
+            uint8_t expected = activeType == 'S' ? 5 : 10;
+            if (field == expected)
+            {
+                type = activeType;
+                activeType = '-';
+                if (type == 'S')
+                {
+                    sdata.cell_id = values[0];
+                    sdata.r = values[1];
+                    sdata.g = values[2];
+                    sdata.b = values[3];
+                    sdata.brightness = values[4];
+                }
+                else
+                {
+                    for (uint8_t i = 0; i < 10; ++i)
+                    {
+                        edata.cols_val[i] = values[i];
+                    }
+                }
+                return true;
+            }
+        }
+        else
+        {
+            activeType = '-';
         }
     }
-    return 0;
+    return false;
 }

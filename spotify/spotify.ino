@@ -61,14 +61,17 @@ void loop() {
 
     // Serial.print(cell_id);Serial.print(' ');Serial.print(R);Serial.print(' ');Serial.print(G);Serial.print(' ');Serial.print(B);Serial.print(' ');Serial.println(bri);
     
-    FastLED.setBrightness((int)bri);
-    leds[(int)cell_id] = CRGB(min((int)R, 255), min((int)G, 255), min((int)B, 255));
+    FastLED.setBrightness((int)min(bri, 255.0f));
+    if (cell_id < 0 || cell_id >= LED_NUM) {
+      return;
+    }
+    leds[(int)cell_id] = CRGB((int)min(R, 255.0f), (int)min(G, 255.0f), (int)min(B, 255.0f));
     FastLED.show();
     Serial.print('d');
   }
 }
 
-// парсер. Возвращает количество принятых байтов даты
+// Validate field count and digit capacity before touching the receive buffer.
 int parsing() {
   static bool parseStart = false;
   static byte counter = 0;
@@ -76,50 +79,43 @@ int parsing() {
 
   if (Serial.available()) {
     char in = Serial.read();
-    if (in == '\n' || in == '\r')
-      return 0;       // игнорируем перевод строки
-    if (in == ';') {  // завершение пакета
-      parseStart = false;
-      return counter;
-    }
-    if (in == '$') {  // начало пакета
+    if (in == '$') {
       parseStart = true;
       counter = 0;
       bi = 0;
       return 0;
     }
-    if (in == '_') {
-      switch (bi)
-      {
-      case 0:
-        cell_len = counter;
-        break;
-      
-      case 1:
-        r_len = counter;
-        break;
-
-      case 2:
-        g_len = counter;
-        break;
-
-      case 3:
-        b_len = counter;
-        break;
-      
-      case 4:
-        bri_len = counter;
-        break;
-      }
-      counter = 0;
-      bi++;
+    if (!parseStart || in == '\n' || in == '\r') {
       return 0;
     }
-    if (parseStart) {  // чтение пакета
-      // - '0' это перевод в число (если отправитель print)
-      buffer[bi][counter] = in - ASCII_CONVERT;
-      counter++;
+    if (in == ';') {
+      parseStart = false;
+      if (bi != 4 || counter == 0) {
+        return 0;
+      }
+      return counter;
     }
+    if (in == '_') {
+      if (bi >= 4 || counter == 0) {
+        parseStart = false;
+        return 0;
+      }
+      switch (bi) {
+        case 0: cell_len = counter; break;
+        case 1: r_len = counter; break;
+        case 2: g_len = counter; break;
+        case 3: b_len = counter; break;
+      }
+      counter = 0;
+      ++bi;
+      return 0;
+    }
+    if (in < '0' || in > '9' || bi >= sizeof(buffer) / sizeof(buffer[0])
+        || counter >= sizeof(buffer[0])) {
+      parseStart = false;
+      return 0;
+    }
+    buffer[bi][counter++] = in - ASCII_CONVERT;
   }
   return 0;
 }
